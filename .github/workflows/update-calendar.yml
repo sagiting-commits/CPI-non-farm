@@ -1,0 +1,45 @@
+name: Update BLS Calendar
+
+on:
+  schedule:
+    # 每星期日 UTC 00:00 (香港時間 08:00) 自動執行更新
+    - cron: '0 0 * * 0'
+  workflow_dispatch: # 允許手動隨時撳制執行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download and filter BLS ICS
+        run: |
+          # 1. 下載 BLS 官方日曆檔
+          curl -s -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+               -H "Accept: text/calendar,text/plain,*/*" \
+               "https://www.bls.gov/schedule/news_release/bls.ics" -o raw.ics
+
+          # 2. 過濾只保留 CPI 與 非農 (Employment Situation)
+          python3 -c '
+          with open("raw.ics", "r", encoding="utf-8", errors="ignore") as f:
+              content = f.read()
+
+          parts = content.split("BEGIN:VEVENT")
+          header = parts[0]
+          events = parts[1:]
+
+          filtered = [e for e in events if "SUMMARY:Consumer Price Index" in e or "SUMMARY:Employment Situation" in e]
+          final_ics = header + "".join(["BEGIN:VEVENT" + e for e in filtered])
+
+          with open("cpi-nfp.ics", "w", encoding="utf-8") as f:
+              f.write(final_ics)
+          '
+          rm -f raw.ics
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add cpi-nfp.ics
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update CPI and NFP calendar" && git push)
